@@ -341,6 +341,9 @@ class GLASS(torch.nn.Module):
                 true_feats = self._embed(img, evaluation=False)[0]
                 true_feats.requires_grad = True
 
+            print("the shape of the embedding is: ")
+            print(true_feats.shape)
+
             mask_s_gt = data_item["mask_s"].reshape(-1, 1).to(self.device)
             noise = torch.normal(0, self.noise, true_feats.shape).to(self.device)
             gaus_feats = true_feats + noise
