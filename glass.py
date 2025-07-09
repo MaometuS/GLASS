@@ -352,6 +352,7 @@ class GLASS(torch.nn.Module):
             dist_t = torch.norm(true_points - c_t_points, dim=1)
             r_t = torch.tensor([torch.quantile(dist_t, q=self.radius)]).to(self.device)
 
+            #adding noise here!!!
             for step in range(self.step + 1):
                 scores = self.discriminator(torch.cat([true_feats, gaus_feats]))
                 true_scores = scores[:len(true_feats)]

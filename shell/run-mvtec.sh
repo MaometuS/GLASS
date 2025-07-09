@@ -1,5 +1,5 @@
-datapath=/root/cqy/dataset/MVTec
-augpath=/root/cqy/dataset/dtd/images
+datapath=/home/maometus/Documents/datasets/mvtec_anomaly_detection
+augpath=/home/maometus/Documents/datasets/dtd/images
 classes=('carpet' 'grid' 'leather' 'tile' 'wood' 'bottle' 'cable' 'capsule' 'hazelnut' 'metal_nut' 'pill' 'screw' 'toothbrush' 'transistor' 'zipper')
 flags=($(for class in "${classes[@]}"; do echo '-d '"${class}"; done))
 
