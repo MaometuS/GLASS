@@ -21,8 +21,23 @@ def downsample(x: torch.Tensor) -> torch.Tensor:
     return x_down
 
 class VarianceMLP(nn.Module):
-    def __init__(self, *args, **kwargs) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, feature_dim=1536, hidden_dim=1024):
+        super().__init__()
+        self.token_mlp = nn.Sequential(
+            nn.Linear(feature_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, feature_dim)
+        )
+        self.variance_head = nn.Sequential(
+            nn.Linear(feature_dim, feature_dim),
+            nn.Softplus()  # ensure positive variance
+        )
+
+    def forward(self, x):  # x: [B, 1296, 1536]
+        x = self.token_mlp(x)     # [B, 1296, 1536]
+        x = x.mean(dim=1)         # [B, 1536] — aggregate over patches
+        var = self.variance_head(x)  # [B, 1536]
+        return var
 
 class Embedder:
     def load(
@@ -307,14 +322,15 @@ def run(
 
     for dataloader_count, dataloaders in enumerate(list_of_dataloaders):
         utils.fix_seeds(seed)
-        dataset_name = dataloaders["training"].name
+        dataset_name = dataloaders["training"]
         print("Dataset is: ", dataset_name)
         imagesize = dataloaders["training"].dataset.imagesize
+        dataset = dataloaders["training"].dataset
 
         embedder: Embedder = methods["get_embedder"](imagesize, device)
         
-        for data in dataloaders["training"]:
-            embedding = embedder.embed(data["image"].to(device))
+        for i in range(len(dataset)):
+            embedding = embedder.embed(dataset[i]["image"].to(device))
             embedding = downsample(embedding)
             print("The embedding shape is: " + str(embedding.shape))
 
