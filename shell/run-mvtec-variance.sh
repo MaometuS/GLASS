@@ -15,17 +15,6 @@ python variance_mlp.py \
     --pretrain_embed_dimension 1536 \
     --target_embed_dimension 1536 \
     --patchsize 3 \
-    --meta_epochs 640 \
-    --eval_epochs 1 \
-    --dsc_layers 2 \
-    --dsc_hidden 1024 \
-    --pre_proj 1 \
-    --mining 1 \
-    --noise 0.015 \
-    --radius 0.75 \
-    --p 0.5 \
-    --step 20 \
-    --limit 392 \
   dataset \
     --distribution 0 \
     --mean 0.5 \

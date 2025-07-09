@@ -1,10 +1,12 @@
-from torch import nn, F
+from torch import nn
+import torch.nn.functional as F
 import torch
 import math
 import common
 import click
 from model import PatchMaker
 import utils
+import backbones
 
 class VarianceMLP(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
@@ -238,8 +240,6 @@ def dataset(
     return "get_dataloaders", get_dataloaders
 
 @main.command("net")
-@click.option("--dsc_margin", type=float, default=0.5)
-@click.option("--train_backbone", is_flag=True)
 @click.option("--backbone", "-b", type=str, default="wideresnet50")
 @click.option("--layers_to_extract_from", "-le", type=str, multiple=True, default=[])
 @click.option("--pretrain_embed_dimension", type=int, default=1024)
@@ -253,10 +253,14 @@ def net(
         patchsize,
 ):
 
+    backbone_model = backbones.load(backbone)
+    backbone_model.name, backbone_model.seed = backbone, None
+
     def get_embedder(input_shape, device) -> Embedder:
+
         embedder = Embedder()
         embedder.load(
-            backbone,
+            backbone_model,
             layers_to_extract_from,
             input_shape,
             device,
@@ -298,6 +302,8 @@ def run(
         embedder: Embedder = methods["get_embedder"](imagesize, device)
         
         for data in dataloaders["training"]:
-            embedding = embedder.embed(data["img"])
-            print("The embedding shape is: " + embedding.shape)
+            embedding = embedder.embed(data["image"].to(device))
+            print("The embedding shape is: " + str(embedding.shape))
 
+if __name__ == "__main__":
+    main()
