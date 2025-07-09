@@ -1,3 +1,4 @@
+from numpy import var
 from torch import nn
 import torch.nn.functional as F
 import torch
@@ -312,6 +313,7 @@ def run(
 ):
     methods = {key: item for (key, item) in methods}
 
+
     # run_save_path = utils.create_storage_folder(
     #     results_path, log_project, log_group, run_name, mode="overwrite"
     # )
@@ -320,18 +322,55 @@ def run(
 
     device = utils.set_torch_device(gpu)
 
-    for dataloader_count, dataloaders in enumerate(list_of_dataloaders):
-        utils.fix_seeds(seed)
-        dataset_name = dataloaders["training"]
-        print("Dataset is: ", dataset_name)
-        imagesize = dataloaders["training"].dataset.imagesize
-        dataset = dataloaders["training"].dataset
+    model = VarianceMLP().to(device)
 
-        embedder: Embedder = methods["get_embedder"](imagesize, device)
+    loss_fn = nn.MSELoss()
 
-        for data in dataloaders["training"]:
-            embedding = embedder.embed(data["image"].to(device))
-            print("The embedding shape is: " + str(embedding.shape))
+    for epoch in range(10):
+        model.train()
+        optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
+        total_loss = 0
+
+        for dataloader_count, dataloaders in enumerate(list_of_dataloaders):
+            utils.fix_seeds(seed)
+            dataset_name = dataloaders["training"]
+            print("Dataset is: ", dataset_name)
+            imagesize = dataloaders["training"].dataset.imagesize
+
+            embedder: Embedder = methods["get_embedder"](imagesize, device)
+
+            for data in dataloaders["training"]:
+                embedding = embedder.embed(data["image"].to(device))
+                embedding = embedding.reshape(data.shape[0], -1, embedding.shape[2])
+                variances = generate_knn_target_variances(embedding)
+                preds = model(embedding)
+                loss = loss_fn(preds, variances)
+                loss.backward()
+                optimizer.step()
+
+                total_loss += loss.item()
+
+            print(f"Epoch {epoch+1} | Loss: {total_loss / len(dataloaders['training']):.6f}")
 
 if __name__ == "__main__":
     main()
+
+def compute_knn_indices(x, k):
+    with torch.no_grad():
+        dists = torch.cdist(x, x, p=2)
+        dists.fill_diagonal_(float('inf'))
+        return dists.topk(k, dim=1, largest=False).indices
+
+def compute_knn_variances(x, knn_indices):
+    N, D = x.shape
+    k = knn_indices.shape[1]
+    variances = torch.zeros(N, D, device=x.device)
+    for i in range(N):
+        neighbors = x[knn_indices[i]]  # [k, D]
+        variances[i] = torch.var(neighbors, dim=0, unbiased=True)
+    return variances
+
+def generate_knn_target_variances(all_patch_embeddings, k=5):
+    rep_features = all_patch_embeddings.mean(dim=1)  # [N, D]
+    knn_indices = compute_knn_indices(rep_features, k)
+    return compute_knn_variances(rep_features, knn_indices)
