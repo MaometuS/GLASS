@@ -328,10 +328,9 @@ def run(
         dataset = dataloaders["training"].dataset
 
         embedder: Embedder = methods["get_embedder"](imagesize, device)
-        
-        for i in range(len(dataset)):
-            embedding = embedder.embed(dataset[i]["image"].to(device))
-            embedding = downsample(embedding)
+
+        for data in dataloaders["training"]:
+            embedding = embedder.embed(data["image"].to(device))
             print("The embedding shape is: " + str(embedding.shape))
 
 if __name__ == "__main__":

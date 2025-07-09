@@ -21,6 +21,6 @@ python variance_mlp.py \
     --std 0.1 \
     --fg 1 \
     --rand_aug 1 \
-    --batch_size 8 \
+    --batch_size 100 \
     --resize 288 \
     --imagesize 288 "${flags[@]}" mvtec $datapath $augpath
