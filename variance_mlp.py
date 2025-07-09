@@ -8,6 +8,18 @@ from model import PatchMaker
 import utils
 import backbones
 
+def downsample(x: torch.Tensor) -> torch.Tensor:
+    H = W = int(x.shape[0]**0.5)
+    x = x.view(H, W, x.shape[1])
+
+    # Downsample by 2x using average pooling
+    x = x.permute(2, 0, 1).unsqueeze(0)
+    x_down = torch.nn.functional.avg_pool2d(x, kernel_size=2, stride=2)
+
+    # Flatten back
+    x_down = x_down.squeeze(0).permute(1, 2, 0).reshape(-1, x.shape[1])
+    return x_down
+
 class VarianceMLP(nn.Module):
     def __init__(self, *args, **kwargs) -> None:
         super().__init__(*args, **kwargs)
@@ -303,6 +315,7 @@ def run(
         
         for data in dataloaders["training"]:
             embedding = embedder.embed(data["image"].to(device))
+            embedding = downsample(embedding)
             print("The embedding shape is: " + str(embedding.shape))
 
 if __name__ == "__main__":
