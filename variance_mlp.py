@@ -8,6 +8,27 @@ import click
 from model import PatchMaker
 import utils
 import backbones
+from tqdm import tqdm
+
+def compute_knn_indices(x, k):
+    with torch.no_grad():
+        dists = torch.cdist(x, x, p=2)
+        dists.fill_diagonal_(float('inf'))
+        return dists.topk(k, dim=1, largest=False).indices
+
+def compute_knn_variances(x, knn_indices):
+    N, D = x.shape
+    k = knn_indices.shape[1]
+    variances = torch.zeros(N, D, device=x.device)
+    for i in range(N):
+        neighbors = x[knn_indices[i]]  # [k, D]
+        variances[i] = torch.var(neighbors, dim=0, unbiased=True)
+    return variances
+
+def generate_knn_target_variances(all_patch_embeddings, k=5):
+    rep_features = all_patch_embeddings.mean(dim=1)  # [N, D]
+    knn_indices = compute_knn_indices(rep_features, k)
+    return compute_knn_variances(rep_features, knn_indices)
 
 def downsample(x: torch.Tensor) -> torch.Tensor:
     H = W = int(x.shape[0]**0.5)
@@ -324,25 +345,25 @@ def run(
 
     model = VarianceMLP().to(device)
 
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
     loss_fn = nn.MSELoss()
 
-    for epoch in range(10):
+    for epoch in tqdm(range(10)):
         model.train()
-        optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
         total_loss = 0
 
-        for dataloader_count, dataloaders in enumerate(list_of_dataloaders):
+        for dataloader_count, dataloaders in tqdm(enumerate(list_of_dataloaders)):
             utils.fix_seeds(seed)
-            dataset_name = dataloaders["training"]
-            print("Dataset is: ", dataset_name)
+            dataset_name = dataloaders["training"].name
             imagesize = dataloaders["training"].dataset.imagesize
 
             embedder: Embedder = methods["get_embedder"](imagesize, device)
 
             for data in dataloaders["training"]:
                 embedding = embedder.embed(data["image"].to(device))
-                embedding = embedding.reshape(data.shape[0], -1, embedding.shape[2])
-                variances = generate_knn_target_variances(embedding)
+                embedding = embedding.reshape(len(data["image"]), -1, embedding.shape[1])
+                k = min(len(data["image"]), 15)
+                variances = generate_knn_target_variances(embedding, k)
                 preds = model(embedding)
                 loss = loss_fn(preds, variances)
                 loss.backward()
@@ -350,27 +371,9 @@ def run(
 
                 total_loss += loss.item()
 
-            print(f"Epoch {epoch+1} | Loss: {total_loss / len(dataloaders['training']):.6f}")
+        print(f"Epoch {epoch+1} | Loss: {total_loss / len(dataloaders['training']):.60f}")
+    torch.save(model.state_dict(), "variance_mlp_15.pth")
 
 if __name__ == "__main__":
     main()
 
-def compute_knn_indices(x, k):
-    with torch.no_grad():
-        dists = torch.cdist(x, x, p=2)
-        dists.fill_diagonal_(float('inf'))
-        return dists.topk(k, dim=1, largest=False).indices
-
-def compute_knn_variances(x, knn_indices):
-    N, D = x.shape
-    k = knn_indices.shape[1]
-    variances = torch.zeros(N, D, device=x.device)
-    for i in range(N):
-        neighbors = x[knn_indices[i]]  # [k, D]
-        variances[i] = torch.var(neighbors, dim=0, unbiased=True)
-    return variances
-
-def generate_knn_target_variances(all_patch_embeddings, k=5):
-    rep_features = all_patch_embeddings.mean(dim=1)  # [N, D]
-    knn_indices = compute_knn_indices(rep_features, k)
-    return compute_knn_variances(rep_features, knn_indices)

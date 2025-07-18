@@ -3,6 +3,7 @@ from collections import OrderedDict
 from torchvision import transforms
 from torch.utils.tensorboard import SummaryWriter
 from model import Discriminator, Projection, PatchMaker
+from variance_mlp import VarianceMLP
 
 import numpy as np
 import pandas as pd
@@ -123,6 +124,9 @@ class GLASS(torch.nn.Module):
         self.model_dir = ""
         self.dataset_name = ""
         self.logger = None
+        self.variance_mlp = VarianceMLP()
+        self.variance_mlp.load_state_dict(torch.load("variance_mlp.pth"))
+        self.variance_mlp.eval()
 
     def set_model_dir(self, model_dir, dataset_name):
         self.model_dir = model_dir
@@ -341,12 +345,18 @@ class GLASS(torch.nn.Module):
                 true_feats = self._embed(img, evaluation=False)[0]
                 true_feats.requires_grad = True
 
-            print("the shape of the embedding is: ")
-            print(true_feats.shape)
-
+            debatched_true_feats = true_feats.reshape(8, -1, true_feats.shape[1])
             mask_s_gt = data_item["mask_s"].reshape(-1, 1).to(self.device)
-            noise = torch.normal(0, self.noise, true_feats.shape).to(self.device)
-            gaus_feats = true_feats + noise
+            predicted_var = self.variance_mlp(debatched_true_feats)
+            std = torch.clamp(torch.sqrt(predicted_var + 1e-6), max=10.0)
+            noise = torch.randn_like(debatched_true_feats) * std.unsqueeze(1) * 1.0
+            gaus_feats = (debatched_true_feats + noise).reshape(true_feats.shape)
+            scores = self.discriminator(torch.cat([true_feats, gaus_feats]))
+            true_scores = scores[:len(true_feats)]
+            gaus_scores = scores[len(true_feats):]
+            true_loss = torch.nn.BCELoss()(true_scores, torch.zeros_like(true_scores))
+            gaus_loss = torch.nn.BCELoss()(gaus_scores, torch.ones_like(gaus_scores))
+            bce_loss = true_loss + gaus_loss
 
             center = self.c.repeat(img.shape[0], 1, 1)
             center = center.reshape(-1, center.shape[-1])
@@ -354,43 +364,45 @@ class GLASS(torch.nn.Module):
             c_t_points = torch.concat([center[mask_s_gt[:, 0] == 0], center], dim=0)
             dist_t = torch.norm(true_points - c_t_points, dim=1)
             r_t = torch.tensor([torch.quantile(dist_t, q=self.radius)]).to(self.device)
+            dist_g = torch.norm(gaus_feats - center, dim=1)
+            r_g = torch.tensor([torch.quantile(dist_g, q=self.radius)]).to(self.device)
 
-            #adding noise here!!!
-            for step in range(self.step + 1):
-                scores = self.discriminator(torch.cat([true_feats, gaus_feats]))
-                true_scores = scores[:len(true_feats)]
-                gaus_scores = scores[len(true_feats):]
-                true_loss = torch.nn.BCELoss()(true_scores, torch.zeros_like(true_scores))
-                gaus_loss = torch.nn.BCELoss()(gaus_scores, torch.ones_like(gaus_scores))
-                bce_loss = true_loss + gaus_loss
+            # #adding noise here!!!
+            # for step in range(self.step + 1):
+            #     scores = self.discriminator(torch.cat([true_feats, gaus_feats]))
+            #     true_scores = scores[:len(true_feats)]
+            #     gaus_scores = scores[len(true_feats):]
+            #     true_loss = torch.nn.BCELoss()(true_scores, torch.zeros_like(true_scores))
+            #     gaus_loss = torch.nn.BCELoss()(gaus_scores, torch.ones_like(gaus_scores))
+            #     bce_loss = true_loss + gaus_loss
 
-                if step == self.step:
-                    break
-                elif self.mining == 0:
-                    dist_g = torch.norm(gaus_feats - center, dim=1)
-                    r_g = torch.tensor([torch.quantile(dist_g, q=self.radius)]).to(self.device)
-                    break
+            #     if step == self.step:
+            #         break
+            #     elif self.mining == 0:
+            #         dist_g = torch.norm(gaus_feats - center, dim=1)
+            #         r_g = torch.tensor([torch.quantile(dist_g, q=self.radius)]).to(self.device)
+            #         break
 
-                grad = torch.autograd.grad(gaus_loss, [gaus_feats])[0]
-                grad_norm = torch.norm(grad, dim=1)
-                grad_norm = grad_norm.view(-1, 1)
-                grad_normalized = grad / (grad_norm + 1e-10)
+            #     grad = torch.autograd.grad(gaus_loss, [gaus_feats])[0]
+            #     grad_norm = torch.norm(grad, dim=1)
+            #     grad_norm = grad_norm.view(-1, 1)
+            #     grad_normalized = grad / (grad_norm + 1e-10)
 
-                with torch.no_grad():
-                    gaus_feats.add_(0.001 * grad_normalized)
+            #     with torch.no_grad():
+            #         gaus_feats.add_(0.001 * grad_normalized)
 
-                if (step + 1) % 5 == 0:
-                    dist_g = torch.norm(gaus_feats - center, dim=1)
-                    r_g = torch.tensor([torch.quantile(dist_g, q=self.radius)]).to(self.device)
-                    proj_feats = center if self.svd == 1 else true_feats
-                    r = r_t if self.svd == 1 else 0.5
+            #     if (step + 1) % 5 == 0:
+            #         dist_g = torch.norm(gaus_feats - center, dim=1)
+            #         r_g = torch.tensor([torch.quantile(dist_g, q=self.radius)]).to(self.device)
+            #         proj_feats = center if self.svd == 1 else true_feats
+            #         r = r_t if self.svd == 1 else 0.5
 
-                    h = gaus_feats - proj_feats
-                    h_norm = dist_g if self.svd == 1 else torch.norm(h, dim=1)
-                    alpha = torch.clamp(h_norm, r, 2 * r)
-                    proj = (alpha / (h_norm + 1e-10)).view(-1, 1)
-                    h = proj * h
-                    gaus_feats = proj_feats + h
+            #         h = gaus_feats - proj_feats
+            #         h_norm = dist_g if self.svd == 1 else torch.norm(h, dim=1)
+            #         alpha = torch.clamp(h_norm, r, 2 * r)
+            #         proj = (alpha / (h_norm + 1e-10)).view(-1, 1)
+            #         h = proj * h
+            #         gaus_feats = proj_feats + h
 
             fake_points = fake_feats[mask_s_gt[:, 0] == 1]
             true_points = true_feats[mask_s_gt[:, 0] == 1]
