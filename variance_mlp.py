@@ -371,6 +371,9 @@ def run(
                 all_patches.append(embedding.cpu())
                 all_patches_mean.append(embedding.mean(dim=1))
 
+            target_variances = generate_knn_target_variances_rep(all_patches_mean, 5).cpu()
+            all_patches_mean = []
+
 
             # for data in dataloaders["training"]:
             #     embedding = embedder.embed(data["image"].to(device))
@@ -384,8 +387,8 @@ def run(
             #
             #     total_loss += loss.item()
 
-        print(f"Epoch {epoch+1} | Loss: {total_loss / len(dataloaders['training']):.60f}")
-    torch.save(model.state_dict(), "variance_mlp_15.pth")
+        # print(f"Epoch {epoch+1} | Loss: {total_loss / len(dataloaders['training']):.60f}")
+    # torch.save(model.state_dict(), "variance_mlp_15.pth")
 
 if __name__ == "__main__":
     main()
