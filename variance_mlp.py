@@ -30,6 +30,10 @@ def generate_knn_target_variances(all_patch_embeddings, k=5):
     knn_indices = compute_knn_indices(rep_features, k)
     return compute_knn_variances(rep_features, knn_indices)
 
+def generate_knn_target_variances_rep(rep_features, k=5):
+    knn_indices = compute_knn_indices(rep_features, k)
+    return compute_knn_variances(rep_features, knn_indices)
+
 def downsample(x: torch.Tensor) -> torch.Tensor:
     H = W = int(x.shape[0]**0.5)
     x = x.view(H, W, x.shape[1])
@@ -359,17 +363,26 @@ def run(
 
             embedder: Embedder = methods["get_embedder"](imagesize, device)
 
+            all_patches = []
+            all_patches_mean = []
+
             for data in dataloaders["training"]:
                 embedding = embedder.embed(data["image"].to(device))
-                embedding = embedding.reshape(len(data["image"]), -1, embedding.shape[1])
-                k = min(len(data["image"]), 15)
-                variances = generate_knn_target_variances(embedding, k)
-                preds = model(embedding)
-                loss = loss_fn(preds, variances)
-                loss.backward()
-                optimizer.step()
+                all_patches.append(embedding.cpu())
+                all_patches_mean.append(embedding.mean(dim=1))
 
-                total_loss += loss.item()
+
+            # for data in dataloaders["training"]:
+            #     embedding = embedder.embed(data["image"].to(device))
+            #     embedding = embedding.reshape(len(data["image"]), -1, embedding.shape[1])
+            #     k = min(len(data["image"]), 15)
+            #     variances = generate_knn_target_variances(embedding, k)
+            #     preds = model(embedding)
+            #     loss = loss_fn(preds, variances)
+            #     loss.backward()
+            #     optimizer.step()
+            #
+            #     total_loss += loss.item()
 
         print(f"Epoch {epoch+1} | Loss: {total_loss / len(dataloaders['training']):.60f}")
     torch.save(model.state_dict(), "variance_mlp_15.pth")
